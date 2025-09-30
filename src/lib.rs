@@ -6,6 +6,9 @@
 //! Inspired-by, but completely unaffiliated with a library in another language
 //! that may or may not have a similar name.
 //!
+//! [See a more complete example in the
+//! repository](https://github.com/neonphog/minimist/tree/main/examples).
+//!
 //! # Examples
 //!
 //! ```
@@ -75,7 +78,7 @@
 //!
 //! assert_eq!(
 //!     vec!["one", "two"],
-//!     args.to_list_str("_").unwrap().collect::<Vec<_>>(),
+//!     args.to_list_str(Minimist::POS).unwrap().collect::<Vec<_>>(),
 //! );
 //! ```
 //!
@@ -87,7 +90,7 @@
 //!
 //! assert_eq!(
 //!     vec!["--t2", "2"],
-//!     args.to_list_str("--").unwrap().collect::<Vec<_>>(),
+//!     args.to_list_str(Minimist::PASS).unwrap().collect::<Vec<_>>(),
 //! );
 //! ```
 //!
@@ -100,7 +103,7 @@
 //! );
 //!
 //! assert_eq!(
-//!     r#"Minimist({"--": ["rest"], "_": ["pos"], "f": [], "p": ["/"], "s": ["hello"]})"#,
+//!     r#"Minimist({"-": ["pos"], "--": ["rest"], "f": [], "p": ["/"], "s": ["hello"]})"#,
 //!     format!("{args:?}"),
 //! );
 //! ```
@@ -111,9 +114,22 @@
 //! # use minimist::Minimist;
 //! let mut args = Minimist::parse(["--nope"]);
 //!
-//! args.entry("hello".into()).or_insert(vec!["world".into()]);
+//! args.set_default("hello", "world");
 //!
 //! assert_eq!("world", args.to_one_str("hello").unwrap());
+//! ```
+//!
+//! ## Set env defaults after parsing
+//!
+//! ```
+//! # use minimist::Minimist;
+//! unsafe { std::env::set_var("MIN_TEST", "apple") }
+//!
+//! let mut args = Minimist::parse(["--nope"]);
+//!
+//! args.set_default_env("test", "MIN_TEST");
+//!
+//! assert_eq!("apple", args.to_one_str("test").unwrap());
 //! ```
 //!
 //! ## Alias flags after parsing
@@ -129,7 +145,7 @@
 //! assert!(args.as_flag("help"));
 //! ```
 //!
-//! ## Alias one's and lists after parsing
+//! ## Alias values after parsing
 //!
 //! ```
 //! # use minimist::Minimist;
@@ -168,6 +184,12 @@ impl std::ops::DerefMut for Minimist {
 }
 
 impl Minimist {
+    /// The arg key for positional items.
+    pub const POS: &'static str = "-";
+
+    /// The arg key for remaining pass-through items after `--`.
+    pub const PASS: &'static str = "--";
+
     /// Parse an argument iterator.
     ///
     /// ```
@@ -195,43 +217,17 @@ impl Minimist {
                     if let Some(f) = last_flag.take() {
                         map.entry(f).or_default().push(v);
                     } else {
-                        map.entry("_".into()).or_default().push(v);
+                        map.entry(Self::POS.into()).or_default().push(v);
                     }
                 }
             }
         }
 
         for v in iter {
-            map.entry("--".into()).or_default().push(v.into());
+            map.entry(Self::PASS.into()).or_default().push(v.into());
         }
 
         Self(map)
-    }
-
-    /// Get an arg as a list of values.
-    ///
-    /// ```
-    /// # use minimist::Minimist;
-    /// Minimist::parse(["-a", "1", "-a", "2"]).as_list("a");
-    /// ```
-    pub fn as_list(
-        &self,
-        arg: &str,
-    ) -> Option<impl Iterator<Item = &OsString>> {
-        self.get(arg).map(|l| l.iter())
-    }
-
-    /// Get an arg as a list of path values.
-    ///
-    /// ```
-    /// # use minimist::Minimist;
-    /// Minimist::parse(["-p", "/a", "-p", "/b"]).as_list_path("p");
-    /// ```
-    pub fn as_list_path(
-        &self,
-        arg: &str,
-    ) -> Option<impl Iterator<Item = &std::path::Path>> {
-        self.as_list(arg).map(|i| i.map(|p| p.as_os_str().as_ref()))
     }
 
     /// Get an arg as a flag (bool).
@@ -264,6 +260,32 @@ impl Minimist {
         self.as_one(arg).map(|p| p.as_os_str().as_ref())
     }
 
+    /// Get an arg as a list of values.
+    ///
+    /// ```
+    /// # use minimist::Minimist;
+    /// Minimist::parse(["-a", "1", "-a", "2"]).as_list("a");
+    /// ```
+    pub fn as_list(
+        &self,
+        arg: &str,
+    ) -> Option<impl Iterator<Item = &OsString>> {
+        self.get(arg).map(|l| l.iter())
+    }
+
+    /// Get an arg as a list of path values.
+    ///
+    /// ```
+    /// # use minimist::Minimist;
+    /// Minimist::parse(["-p", "/a", "-p", "/b"]).as_list_path("p");
+    /// ```
+    pub fn as_list_path(
+        &self,
+        arg: &str,
+    ) -> Option<impl Iterator<Item = &std::path::Path>> {
+        self.as_list(arg).map(|i| i.map(|p| p.as_os_str().as_ref()))
+    }
+
     /// Get an arg as a single (first) lossy string.
     ///
     /// ```
@@ -285,6 +307,30 @@ impl Minimist {
         arg: &str,
     ) -> Option<impl Iterator<Item = std::borrow::Cow<'_, str>>> {
         self.as_list(arg).map(|i| i.map(|s| s.to_string_lossy()))
+    }
+
+    /// Sets a default value to an arg, only if a value doesn't already exist.
+    pub fn set_default(
+        &mut self,
+        arg: impl std::fmt::Display,
+        val: impl Into<OsString>,
+    ) {
+        let arg = self.0.entry(arg.to_string()).or_default();
+        if arg.is_empty() {
+            arg.push(val.into());
+        }
+    }
+
+    /// Sets a default value to an arg based on an environment variable, only
+    /// if a value for the arg doesn't already exist, and the env var does.
+    pub fn set_default_env(
+        &mut self,
+        arg: impl std::fmt::Display,
+        env: impl AsRef<std::ffi::OsStr>,
+    ) {
+        if let Some(env) = std::env::var_os(env) {
+            self.set_default(arg, env);
+        }
     }
 }
 
@@ -338,7 +384,7 @@ mod test {
         (
             "single dashes",
             &["-", "-ab", "-", "--c", "-", "-", "--", "-"],
-            r#"Minimist({"--": ["-"], "_": ["-", "-"], "a": [], "b": ["-"], "c": ["-"]})"#,
+            r#"Minimist({"-": ["-", "-"], "--": ["-"], "a": [], "b": ["-"], "c": ["-"]})"#,
         ),
         (
             "sane repeats",
