@@ -12,6 +12,9 @@ For when clap feels like too much.
 Inspired-by, but completely unaffiliated with a library in another language
 that may or may not have a similar name.
 
+[See a more complete example in the
+repository](https://github.com/neonphog/minimist/tree/main/examples).
+
 ## Examples
 
 ```rust
@@ -76,7 +79,7 @@ let args = Minimist::parse(["one", "-f", "bob", "two"]);
 
 assert_eq!(
     vec!["one", "two"],
-    args.to_list_str("_").unwrap().collect::<Vec<_>>(),
+    args.to_list_str(Minimist::POS).unwrap().collect::<Vec<_>>(),
 );
 ```
 
@@ -87,7 +90,7 @@ let args = Minimist::parse(["--t1", "1", "--", "--t2", "2"]);
 
 assert_eq!(
     vec!["--t2", "2"],
-    args.to_list_str("--").unwrap().collect::<Vec<_>>(),
+    args.to_list_str(Minimist::PASS).unwrap().collect::<Vec<_>>(),
 );
 ```
 
@@ -99,7 +102,7 @@ let args = Minimist::parse(
 );
 
 assert_eq!(
-    r#"Minimist({"--": ["rest"], "_": ["pos"], "f": [], "p": ["/"], "s": ["hello"]})"#,
+    r#"Minimist({"-": ["pos"], "--": ["rest"], "f": [], "p": ["/"], "s": ["hello"]})"#,
     format!("{args:?}"),
 );
 ```
@@ -109,9 +112,21 @@ assert_eq!(
 ```rust
 let mut args = Minimist::parse(["--nope"]);
 
-args.entry("hello".into()).or_insert(vec!["world".into()]);
+args.set_default("hello", "world");
 
 assert_eq!("world", args.to_one_str("hello").unwrap());
+```
+
+### Set env defaults after parsing
+
+```rust
+unsafe { std::env::set_var("MIN_TEST", "apple") }
+
+let mut args = Minimist::parse(["--nope"]);
+
+args.set_default_env("test", "MIN_TEST");
+
+assert_eq!("apple", args.to_one_str("test").unwrap());
 ```
 
 ### Alias flags after parsing
@@ -126,7 +141,7 @@ if args.as_flag("h") {
 assert!(args.as_flag("help"));
 ```
 
-### Alias one's and lists after parsing
+### Alias values after parsing
 
 ```rust
 let mut args = Minimist::parse(["-f", "banana", "--fruit", "apple"]);
